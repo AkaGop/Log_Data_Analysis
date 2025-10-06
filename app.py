@@ -1,210 +1,161 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  3 14:47:38 2025
-
-@author: Gopal
+Module: app.py
+Author: Jules
 """
 
+import streamlit as st
+import pandas as pd
+from parser import load_and_parse_log, KNOWLEDGE_BASE
+from io import StringIO
 import re
-import os
-import csv
-from datetime import datetime
-from collections import defaultdict
 
-# --- KNOWLEDGE BASE (Derived from Hirata Manuals) ---
-KNOWLEDGE_BASE = {
-    "ceid_map": {
-        18: "Alarm Set/Clear", 113: "Alarm Set/Clear", 114: "Alarm Set/Clear",
-        131: "LoadToToolCompleted", 132: "UnloadFromToolCompleted",
-        136: "MappingCompleted", 141: "PortStatusChange", 150: "RequestMagazineDock",
-        151: "MagazineDocked", 152: "RequestOperatorIdCheck", 180: "RequestMagazineDock",
-        181: "MagazineDocked", 182: "MagazineUndocked", 183: "RequestOperatorIdCheck",
-        184: "RequestOperatorLogin",
-    },
-    "secs_map": {
-        "S1F1": "Are You There Request", "S1F2": "Are You There Data",
-        "S2F31": "Date and Time Request", "S2F32": "Date and Time Data",
-        "S6F11": "Event Report Send", "S6F12": "Event Report Acknowledge",
-        "S2F49": "Enhanced Remote Command", "S2F50": "Enhanced Remote Command Acknowledge",
-    }
-}
+def generate_summary_text(df):
+    """Generates a human-readable summary report from the DataFrame."""
+    summary_lines = []
 
-def parse_secs_data(data_lines, ceid_map):
-    """Parses a list of data lines into a structured dictionary."""
-    full_text = "".join(data_lines)
-    data = {}
+    # --- Executive Summary ---
+    alarms_present = not df[df['AlarmID'].notna()].empty
+
+    summary_lines.append("### 1. EXECUTIVE SUMMARY ###")
+    if alarms_present:
+        summary_lines.append("The equipment is in a **fault state**. Alarms were detected during the process.")
+    else:
+        summary_lines.append("The process was successful and represents a **'Golden Run'**. No critical alarms were detected.")
+    summary_lines.append("\n")
+
+    # --- Key Entities ---
+    summary_lines.append("### 2. KEY ENTITIES IDENTIFIED ###")
+    operators = df['OperatorID'].dropna().unique()
+    magazines = df['MagazineID'].dropna().unique()
+    lots = df['LotID'].dropna().unique()
+
+    summary_lines.append(f"- **Operator(s):** {', '.join(operators) if operators.any() else 'N/A'}")
+    summary_lines.append(f"- **Magazine(s):** {', '.join(magazines) if magazines.any() else 'N/A'}")
+    summary_lines.append(f"- **Lot ID(s):** {', '.join(lots) if lots.any() else 'N/A'}")
+    summary_lines.append("\n")
     
-    potential_ids = re.findall(r"<\s*U\d\s*\[\d+\]\s*(\d+)\s*>", full_text)
-    for pid in potential_ids:
-        pid = int(pid)
-        if pid in ceid_map:
-            if "Alarm" in ceid_map[pid]: data['AlarmID'] = pid
-            else: data['CEID'] = pid
-            break 
+    # --- Operational Walkthrough ---
+    summary_lines.append("### 3. DETAILED OPERATIONAL WALKTHROUGH ###")
+    dock_events = df[df['Event'] == 'MagazineDocked']
+    if not dock_events.empty:
+        for _, event in dock_events.iterrows():
+            summary_lines.append(f"- **{event['Timestamp']}:** Magazine '{event['MagazineID']}' was docked by operator '{event['OperatorID']}'.")
 
-    rcmd_match = re.search(r"<\s*A\s*\[\d+\]\s*'([A-Z_]{5,})'\s*>", full_text)
-    if rcmd_match: data['RCMD'] = rcmd_match.group(1)
+    map_complete_events = df[df['Event'] == 'MappingCompleted']
+    if not map_complete_events.empty:
+        summary_lines.append("- Magazine slot mapping was successfully completed.")
 
-    patterns = {
-        'OperatorID': r"'OPERATORID'>\s*<A\s*\[\d+\]\s*'(\w+)'",
-        'MagazineID': r"'MAGAZINEID'>\s*<A\s*\[\d+\]\s*'([\w-]+)'",
-        'Result': r"'RESULT'>\s*<U1\s*\[\d+\]\s*(\d+)>",
-        'LotID': r"'LOTID'>\s*<A\s*\[\d+\]\s*'([\d\.]+)'",
-    }
-    for key, pattern in patterns.items():
-        match = re.search(pattern, full_text)
-        if match:
-            if key == 'Result': data[key] = "Success" if match.group(1) == '0' else f"Failure({match.group(1)})"
-            else: data[key] = match.group(1)
+    load_complete_events = df[df['Event'] == 'LoadToToolCompleted']
+    if not load_complete_events.empty:
+        summary_lines.append("- Panel loading to the tool was completed.")
 
-    panel_ids = re.findall(r"<\s*A\s*\[\d+\]\s*'(\d{9,})'\s*>", full_text)
-    if panel_ids:
-        unique_panels = list(set([p for p in panel_ids if len(p) < 15]))
-        if unique_panels: data['PanelIDs'] = unique_panels
-    return data
+    unload_complete_events = df[df['Event'] == 'UnloadFromToolCompleted']
+    if not unload_complete_events.empty:
+        summary_lines.append("- Panel unloading from the tool was completed.")
+    summary_lines.append("\n")
 
-def generate_event_description(event, ceid_map):
-    """Generates a human-readable description for the CSV."""
-    data = event.get('data', {})
-    ceid, rcmd, alarm_id = data.get('CEID'), data.get('RCMD'), data.get('AlarmID')
+    # --- Alarms and Anomalies ---
+    summary_lines.append("### 4. ANOMALY ANALYSIS & MAINTENANCE INSIGHTS ###")
+    if alarms_present:
+        summary_lines.append("**Alarms Detected:**")
+        for _, alarm in df[df['AlarmID'].notna()].iterrows():
+            summary_lines.append(f"- **{alarm['Timestamp']}:** Alarm with ID `{int(alarm['AlarmID'])}` was triggered.")
+    else:
+        summary_lines.append("No significant anomalies or alarms were detected.")
+    summary_lines.append("\n")
 
-    if rcmd:
-        if rcmd == "LOADSTART": return f"Host Command: Initiating LOADSTART for Lot '{data.get('LotID', 'N/A')}' with {len(data.get('PanelIDs', []))} panels."
-        if rcmd == "REPLYOPERATORLOGIN": return f"Host Command: Acknowledging Operator Login for '{data.get('OperatorID', 'N/A')}'. Result: {data.get('Result', 'N/A')}."
-        if rcmd == "REPLYMAGAZINEDOCK": return f"Host Command: Acknowledging Magazine Dock for '{data.get('MagazineID', 'N/A')}'. Result: {data.get('Result', 'N/A')}."
-        if rcmd == "REPLYMAPPINGCHECK": return f"Host Command: Acknowledging mapping results. Result: {data.get('Result', 'N/A')}."
-        return f"Host Command: {rcmd}"
-    if alarm_id: return f"Warning: Anomaly detected with Alarm ID '{alarm_id}' while equipment was idle."
-    if ceid:
-        ceid_desc = ceid_map.get(ceid, f"Unknown CEID {ceid}")
-        if "RequestOperatorLogin" in ceid_desc: return f"Event: Operator Login Requested (ID: {data.get('OperatorID', 'N/A')})."
-        if "RequestMagazineDock" in ceid_desc: return f"Event: Magazine Dock Requested (ID: {data.get('MagazineID', 'N/A')})."
-        if "MagazineDocked" in ceid_desc: return "Event: Magazine has been successfully docked."
-        if "MappingCompleted" in ceid_desc: return f"Event: Magazine mapping completed. Found {len(data.get('PanelIDs', []))} panels."
-        if "LoadToToolCompleted" in ceid_desc: return "Event: All panels successfully loaded to the tool."
-        return f"Event: {ceid_desc}"
-    return ""
+    # --- Action Plan ---
+    summary_lines.append("### 5. ACTIONABLE MAINTENANCE RECOMMENDATIONS ###")
+    if alarms_present:
+        summary_lines.append("- **Priority 1: Investigate Alarms.** Create a service ticket to investigate the cause of the triggered alarms.")
+    summary_lines.append("- **Priority 2: Monitor Performance.** Track the KPIs from this report to establish performance baselines.")
 
-def load_and_parse_log(input_filename, knowledge_base):
-    """Loads and parses the entire log file into a structured list of events."""
-    events = []
-    with open(input_filename, 'r') as f: lines = f.readlines()
-    
-    current_tid = None
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        match = re.match(r"(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d+),\[([^\]]+)\],(.*)", line)
-        if not match: i+=1; continue
-        timestamp, log_type, message_part = match.groups()
-        
-        tid_match = re.search(r"TransactionID=(\d+)", message_part)
-        if tid_match: current_tid = tid_match.group(1)
-        
-        msg_name = (re.search(r"Message=.*?:'(\w+)'", message_part) or re.search(r"MessageName=(\w+)", message_part))
-        msg_name = msg_name.group(1) if msg_name else "N/A"
-        
-        data = {}
-        if "Core:Send" in log_type or "Core:Receive" in log_type:
-            if i + 1 < len(lines) and lines[i+1].strip().startswith('<'):
-                data_block_lines = []
-                j = i + 1
-                while j < len(lines) and lines[j].strip() != '.': data_block_lines.append(lines[j]); j += 1
-                i = j
-                data = parse_secs_data(data_block_lines, knowledge_base['ceid_map'])
-        
-        events.append({"timestamp": timestamp, "tid": current_tid, "msg_name": msg_name, "data": data})
-        i += 1
-    return events
+    return "\n".join(summary_lines)
 
-def generate_csv_report(events, csv_filename, knowledge_base):
-    """Generates a detailed CSV file from the parsed event data."""
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        header = ["Timestamp", "MessageType", "MessageDescription", "EventDescription", "CEID", "AlarmID", "RCMD", "DataSummary"]
-        writer.writerow(header)
-        for event in events:
-            if not event['data']: continue
-            description = generate_event_description(event, knowledge_base['ceid_map'])
-            if description:
-                data_summary = "; ".join([f"{k}:{v}" for k, v in event['data'].items() if k not in ['CEID', 'RCMD', 'AlarmID'] and v])
-                writer.writerow([
-                    event['timestamp'], event['msg_name'], knowledge_base['secs_map'].get(event['msg_name'], ''), 
-                    description, event['data'].get('CEID', ''), event['data'].get('AlarmID', ''), 
-                    event['data'].get('RCMD', ''), data_summary
-                ])
-
-def generate_summary_report(events, summary_filename, knowledge_base):
-    """Analyzes all events and generates a dynamic, human-readable summary report."""
-    if not events:
-        with open(summary_filename, 'w', encoding='utf-8') as f: f.write("Log file is empty or could not be parsed.")
-        return
-
-    summary_data = {"operators": set(), "magazines": set(), "lot_id": None, "panel_count": 0, "job_start_time": None, "job_end_time": None, "anomalies": [], "alarms": defaultdict(int)}
-    for event in events:
-        data = event.get('data', {})
-        if not data: continue
-        if data.get('OperatorID'): summary_data['operators'].add(data['OperatorID'])
-        if data.get('MagazineID'): summary_data['magazines'].add(data['MagazineID'])
-        if data.get('RCMD') == 'LOADSTART':
-            summary_data['lot_id'], summary_data['panel_count'], summary_data['job_start_time'] = data.get('LotID'), len(data.get('PanelIDs', [])), event['timestamp']
-        if data.get('CEID') == 131: summary_data['job_end_time'] = event['timestamp']
-        if data.get('Result', '').startswith("Failure"): summary_data['anomalies'].append(f"- {event['timestamp']}: A command failed: {generate_event_description(event, knowledge_base['ceid_map'])}")
-        if data.get('AlarmID'): summary_data['alarms'][data['AlarmID']] += 1
-
-    with open(summary_filename, 'w', encoding='utf-8') as f:
-        f.write("="*80 + "\n" + "MAINTENANCE & RELIABILITY ANALYSIS REPORT\n" + f"Log File Analyzed: {os.path.basename(summary_filename).replace('_summary.txt', '.txt')}\n" + f"Date of Log: {events[0]['timestamp'].split(' ')[0]}\n" + "="*80 + "\n\n")
-        f.write("### 1. EXECUTIVE SUMMARY ###\nThis report analyzes the equipment's operational log. The system is deemed **operationally healthy**. ")
-        if summary_data['job_start_time']: f.write(f"It successfully completed an automated loading cycle for Lot ID '{summary_data['lot_id']}' without critical failures. ")
-        f.write("Anomalies are detailed below but did not impact production.\n\n")
-        f.write("### 2. DETAILED OPERATIONAL WALKTHROUGH ###\n\n" + "**Phase A: Job Setup**\n")
-        f.write(f"The process was initiated by operator(s): {', '.join(summary_data['operators']) or 'N/A'}. Magazine(s) used: {', '.join(summary_data['magazines']) or 'N/A'}. The log shows successful magazine docking, slot mapping, and state transitions (MIR -> MIC -> MPC) preparing for the automated job.\n\n")
-        f.write("**Phase B: Automated Production Cycle**\n")
-        if summary_data['job_start_time']:
-            f.write(f"At {summary_data['job_start_time']}, the host commanded a `LOADSTART` for Lot ID **'{summary_data['lot_id']}'**, containing **{summary_data['panel_count']} panels**.\n")
-            if summary_data['job_end_time']:
-                start = datetime.strptime(summary_data['job_start_time'], "%Y/%m/%d %H:%M:%S.%f"); end = datetime.strptime(summary_data['job_end_time'], "%Y/%m/%d %H:%M:%S.%f")
-                duration = (end - start).total_seconds(); cycle_time = duration / summary_data['panel_count'] if summary_data['panel_count'] > 0 else 0
-                f.write(f"The entire automated process took **{duration:.2f} seconds**. The average cycle time per panel was approximately **{cycle_time:.2f} seconds**. This is a critical performance baseline.\n\n")
-        else: f.write("No major automated production job (like LOADSTART) was detected in this log file.\n\n")
-        f.write("### 3. ANOMALY ANALYSIS & MAINTENANCE INSIGHTS ###\n\n")
-        if not summary_data['anomalies'] and not summary_data['alarms']: f.write("No significant anomalies or alarms were detected.\n\n")
-        else:
-            for anomaly in summary_data['anomalies']: f.write(f"**Anomaly (Transient Error):**\n  {anomaly}\n  **Analysis:** This was a temporary, self-recovering issue, likely related to operator timing rather than a persistent hardware fault.\n\n")
-            if summary_data['alarms']:
-                f.write("**Anomalies (Idle-State Alarms):**\n")
-                for alarm_id, count in summary_data['alarms'].items(): f.write(f"  - **Alarm ID {alarm_id}:** Occurred {count} time(s) while the equipment was idle.\n")
-                f.write("  - **Analysis:** These alarm codes are **NOT DOCUMENTED** in the standard operation manual and are classified as non-critical warnings.\n\n")
-        f.write("### 4. ACTIONABLE MAINTENANCE RECOMMENDATIONS ###\n\n")
-        f.write("**Priority 1: Investigate Undocumented Alarms (If Present)**\n  - Action: If 'Idle-State Alarms' were noted, create a service ticket with Hirata support. Provide this log and request a full alarm code dictionary.\n\n")
-        f.write("**Priority 2: Monitor Transient Errors (If Present)**\n  - Action: If any docking failures were noted, log their occurrence. If frequent, schedule a PM to inspect the relevant sensors and alignments.\n\n")
-        f.write("**Priority 3: Establish Performance Baselines**\n  - Action: Formally document the average panel transfer cycle time calculated in this report as the current performance benchmark for this equipment. Tracking this KPI will help detect performance degradation over time.\n")
 
 def main():
     """Main execution block to handle user input and run analysis."""
-    input_file = input("Please enter the name of the log file to analyze (e.g., Mess_4.txt): ")
-    if not os.path.exists(input_file):
-        print(f"\n--- ERROR ---\nFile not found: '{input_file}'\nPlease ensure the file is in the same directory and the name is spelled correctly.")
-        return
-    
-    base_name = os.path.splitext(input_file)[0]
-    csv_out = f"{base_name}_report.csv"
-    summary_out = f"{base_name}_summary.txt"
+    st.set_page_config(layout="wide")
+    st.title("Hirata Loadport Log Analysis")
 
-    print("\nStarting analysis...")
-    
-    events = load_and_parse_log(input_file, KNOWLEDGE_BASE)
-    
-    if not events:
-        print("Could not find any valid events to analyze in the log file.")
-        return
+    uploaded_file = st.file_uploader("Upload a log file", type="txt")
+
+    if uploaded_file is not None:
+        log_content = uploaded_file.getvalue().decode("utf-8")
         
-    generate_csv_report(events, csv_out, KNOWLEDGE_BASE)
-    generate_summary_report(events, summary_out, KNOWLEDGE_BASE)
-    
-    print(f"\nAnalysis complete!")
-    print(f"-> Detailed CSV report saved to: '{csv_out}'")
-    print(f"-> Summary report saved to: '{summary_out}'")
+        df = load_and_parse_log(log_content, KNOWLEDGE_BASE)
+        
+        if df.empty:
+            st.warning("Could not find any valid events to analyze in the log file.")
+            return
+
+        st.success("File uploaded and processed successfully!")
+
+        # --- Generate Reports ---
+        summary_text = generate_summary_text(df)
+
+        # --- UI Sections ---
+        
+        # Section 1: Executive Summary
+        st.header("Executive Summary")
+        if "fault state" in summary_text:
+            st.error("Equipment is in a fault state. Priority: High.")
+        else:
+            st.success("Process was successful. This represents a 'Golden Run.'")
+
+        # Section 2: Key Performance Indicators (KPIs)
+        st.header("Key Performance Indicators (KPIs)")
+        try:
+            # Cycle Time: From first dock to last unload
+            start_time = df[df['CEID'] == 181]['Timestamp'].min()
+            end_time = df[df['CEID'] == 132]['Timestamp'].max()
+
+            # Mapping Time: From port state 'MIC' to 'MappingCompleted'
+            map_start_time = df[df['PortState'] == 'MIC']['Timestamp'].min()
+            map_end_time = df[df['CEID'] == 136]['Timestamp'].max()
+
+            total_cycle_time = (end_time - start_time).total_seconds() if pd.notna(start_time) and pd.notna(end_time) else "N/A"
+            mapping_time = (map_end_time - map_start_time).total_seconds() if pd.notna(map_start_time) and pd.notna(map_end_time) else "N/A"
+
+            panel_count = df[df['Event'] == 'UnloadedFromMag']['Timestamp'].count()
+            avg_time_per_panel = (total_cycle_time / panel_count) if isinstance(total_cycle_time, (int, float)) and panel_count > 0 else "N/A"
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Cycle Time", f"{total_cycle_time:.2f}s" if isinstance(total_cycle_time, (int, float)) else "N/A")
+            col2.metric("Mapping Time", f"{mapping_time:.2f}s" if isinstance(mapping_time, (int, float)) else "N/A")
+            col3.metric("Average Time Per Panel", f"{avg_time_per_panel:.2f}s" if isinstance(avg_time_per_panel, (int, float)) else "N/A")
+
+        except Exception as e:
+            st.warning(f"Could not calculate all KPIs. This might be due to missing events in the log. Error: {e}")
+
+        # Section 3: Summary Report & Action Plan
+        st.header("Summary Report & Action Plan")
+        st.markdown(summary_text)
+
+        # Section 4: Detailed Event Log
+        st.header("Detailed Event Log")
+        st.dataframe(df.astype(str))
+
+        # Section 5: Download Buttons
+        st.header("Download Reports")
+        
+        csv_buffer = StringIO()
+        df.to_csv(csv_buffer, index=False, encoding='utf-8')
+
+        st.download_button(
+            label="Download Full Report (.csv)",
+            data=csv_buffer.getvalue(),
+            file_name=f"{os.path.splitext(uploaded_file.name)[0]}_report.csv",
+            mime="text/csv",
+        )
+
+        st.download_button(
+            label="Download Summary (.txt)",
+            data=summary_text,
+            file_name=f"{os.path.splitext(uploaded_file.name)[0]}_summary.txt",
+            mime="text/plain",
+        )
 
 if __name__ == "__main__":
     main()
