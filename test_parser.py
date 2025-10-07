@@ -24,7 +24,7 @@ def run_test():
         print(df['Event'].value_counts())
 
         print("\n--- Sample Data ---")
-        print(df.dropna(subset=['PortState', 'MagazineID', 'LotID', 'PanelID'], how='all').head())
+        print(df.dropna(subset=['PortState', 'MagazineID'], how='all').head())
 
         print("\n--- TEST COMPLETE ---")
 
