@@ -1,20 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Oct  3 14:47:38 2025
-
-@author: Gopal
-"""
-
-# -*- coding: utf-8 -*-
-"""
 Hirata Loadport Log Analyzer
 Streamlit application to parse and analyze Hirata Loadport communication logs.
 """
 import os
 import streamlit as st
-from knowledge_base import KNOWLEDGE_BASE
-from parser import load_and_parse_log
-from reporting import generate_chronological_report, generate_csv_report
+from src.knowledge_base import KNOWLEDGE_BASE
+from src.parser import load_and_parse_log
+from src.reporting import generate_chronological_report, generate_csv_report
 
 @st.cache_data
 def analyze_log_file(log_content, filename):
