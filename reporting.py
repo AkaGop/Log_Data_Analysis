@@ -76,6 +76,40 @@ def generate_event_description(event):
     return "Unknown log entry."
 
 
+def generate_summary_report(events):
+    """Analyzes events to generate a high-level summary with KPIs."""
+    if not events:
+        return "No data available to generate a summary."
+
+    # --- KPI Calculations ---
+    start_time = pd.to_datetime(events[0]['timestamp'])
+    end_time = pd.to_datetime(events[-1]['timestamp'])
+    total_cycle_time = end_time - start_time
+
+    panels_processed = sum(1 for event in events if event.get('data', {}).get('CEID') in [131, 132])
+    alarms_set = sum(1 for event in events if event.get('data', {}).get('AlarmState') == 'AlarmSet')
+
+    # --- Executive Summary ---
+    if alarms_set > 0:
+        executive_summary = "Fault State Detected"
+        summary_color = "color: red;"
+    else:
+        executive_summary = "Golden Run"
+        summary_color = "color: green;"
+
+    # --- Report Generation ---
+    report_lines = [
+        "### Analysis Summary Report",
+        "---",
+        f"**Executive Summary:** <span style='{summary_color}'>{executive_summary}</span>",
+        "#### Key Performance Indicators (KPIs):",
+        f"- **Total Cycle Time:** {total_cycle_time}",
+        f"- **Total Panels Processed:** {panels_processed}",
+        f"- **Total Alarms:** {alarms_set}",
+    ]
+
+    return "\n".join(report_lines)
+
 def generate_chronological_report(events):
     """Analyzes all events and generates a dynamic, chronological report."""
     if not events:

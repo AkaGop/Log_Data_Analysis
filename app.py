@@ -14,7 +14,7 @@ import os
 import streamlit as st
 from knowledge_base import KNOWLEDGE_BASE
 from parser import load_and_parse_log
-from reporting import generate_chronological_report, generate_csv_report
+from reporting import generate_summary_report, generate_csv_report
 
 @st.cache_data
 def analyze_log_file(log_content, filename):
@@ -25,16 +25,16 @@ def analyze_log_file(log_content, filename):
     events = load_and_parse_log(log_content)
     if not events:
         return None, None
-    
-    chronological_report = generate_chronological_report(events)
+
+    summary_report = generate_summary_report(events)
     detailed_df = generate_csv_report(events)
-    return chronological_report, detailed_df
+    return summary_report, detailed_df
 
 def main():
     """Main execution block for the Streamlit application."""
     st.set_page_config(layout="wide")
     st.title("Hirata Loadport Log Analyzer")
-    st.markdown("Upload a log file to see a detailed, chronological breakdown of all equipment operations.")
+    st.markdown("Upload a log file to see a high-level analysis summary and detailed event data.")
 
     uploaded_file = st.file_uploader("Upload a Hirata Loadport Log File", type=['txt', 'log'])
 
@@ -49,29 +49,20 @@ def main():
 
         with st.spinner(f"Analyzing {log_filename}... (First analysis may take a moment)"):
             try:
-                chronological_report, detailed_df = analyze_log_file(log_content, log_filename)
+                summary_report, detailed_df = analyze_log_file(log_content, log_filename)
             except Exception as e:
                 st.error(f"An unexpected error occurred during log analysis: {e}")
                 st.warning("The log file may have an unexpected format. Please verify the file is a valid Hirata Loadport log.")
                 return
 
-        if not chronological_report:
+        if not summary_report:
             st.error("Analysis complete, but no valid SECS/GEM events were found in the log file.")
             return
 
         st.success("Analysis Complete!")
-        st.subheader("Chronological Operation Report")
-        st.text_area(
-            "Sequence of Events",
-            chronological_report,
-            height=500
-        )
-        st.download_button(
-            "Download Report (.txt)",
-            chronological_report,
-            f"{os.path.splitext(log_filename)[0]}_chronological_report.txt",
-            "text/plain"
-        )
+
+        # Display the summary report
+        st.markdown(summary_report, unsafe_allow_html=True)
 
         st.subheader("Detailed Event Data (CSV)")
         st.dataframe(detailed_df)
