@@ -4,6 +4,7 @@ Reporting Logic for Hirata Loadport Log Analyzer.
 This module generates CSV and chronological, human-readable reports.
 """
 import pandas as pd
+from datetime import datetime
 from src.knowledge_base import KNOWLEDGE_BASE
 
 # --- Individual Description Generators ---
@@ -107,3 +108,67 @@ def generate_csv_report(events):
         report_data.append(row)
         
     return pd.DataFrame(report_data, columns=full_header)
+
+def generate_executive_summary(events):
+    """
+    Generates a high-level summary based on the presence of alarms.
+    """
+    has_alarms = any(event['data'].get('AlarmState') == 'AlarmSet' for event in events)
+
+    if has_alarms:
+        summary = (
+            "**Assessment: Equipment FAULT**\n"
+            "**Priority: HIGH**\n\n"
+            "One or more alarms were triggered during the operation. "
+            "This indicates a potential issue that may require immediate attention. "
+            "Review the detailed event log for specific alarm codes and timestamps."
+        )
+    else:
+        summary = (
+            "**Assessment: Golden Run**\n"
+            "**Priority: Low**\n\n"
+            "The process completed successfully without any critical alarms. "
+            "This log represents a 'Golden Run' and can be used as a baseline for normal operations."
+        )
+    return summary
+
+def calculate_kpis(events, detailed_df):
+    """
+    Calculates Key Performance Indicators (KPIs) from the event data.
+    """
+    kpis = {
+        "Total Cycle Time": "N/A",
+        "Mapping Time": "N/A",
+        "Average Time Per Panel": "N/A",
+        "Panel Count": "N/A"
+    }
+
+    df = detailed_df.copy()
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y/%m/%d %H:%M:%S.%f')
+
+    # --- Total Cycle Time (LOADSTART to LoadToToolCompleted) ---
+    load_start_time = df[df['RCMD'] == 'LOADSTART']['Timestamp'].min()
+    load_complete_time = df[df['CEID'] == 131]['Timestamp'].max() # CEID 131: LoadToToolCompleted
+
+    if pd.notna(load_start_time) and pd.notna(load_complete_time):
+        total_cycle_duration = load_complete_time - load_start_time
+        kpis["Total Cycle Time"] = str(total_cycle_duration)
+
+    # --- Mapping Time (MIC to MappingCompleted) ---
+    mic_time = df[(df['CEID'] == 141) & (df['PortState'] == 'MIC')]['Timestamp'].min()
+    map_complete_time = df[df['CEID'] == 136]['Timestamp'].max() # CEID 136: MappingCompleted
+
+    if pd.notna(mic_time) and pd.notna(map_complete_time):
+        mapping_duration = map_complete_time - mic_time
+        kpis["Mapping Time"] = str(mapping_duration)
+
+    # --- Average Time Per Panel ---
+    panel_count_series = df[df['CEID'] == 136]['PanelCount'].dropna()
+    if not panel_count_series.empty:
+        panel_count = int(panel_count_series.iloc[0])
+        kpis["Panel Count"] = panel_count
+        if pd.notna(load_start_time) and pd.notna(load_complete_time) and panel_count > 0:
+            avg_time = (load_complete_time - load_start_time) / panel_count
+            kpis["Average Time Per Panel"] = str(avg_time)
+
+    return kpis

@@ -47,6 +47,17 @@ def _parse_magazine_docked(full_text):
         })
     return data
 
+def _parse_mapping_completed(full_text):
+    """Parses CEID 136 (MappingCompleted)."""
+    data = {}
+    # Example: < A [24] 'Panels: 24 of 24 panels' >
+    match = re.search(r"Panels: (\d+) of", full_text)
+    if match:
+        data['PanelCount'] = int(match.group(1))
+        data['SlotInfo'] = match.group(0).strip("'")
+    return data
+
+
 def _parse_generic(full_text):
     """Generic fallback parser for simple key-value pairs."""
     data = {}
@@ -66,6 +77,7 @@ CEID_PARSERS = {
     141: _parse_port_status_change,
     120: _parse_id_read,
     181: _parse_magazine_docked,
+    136: _parse_mapping_completed,
     # Add other CEID -> function mappings here as needed
 }
 
