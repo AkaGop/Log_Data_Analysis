@@ -2,9 +2,6 @@
 
 A Streamlit web application for parsing, analyzing, and visualizing Hirata Loadport SECS/GEM communication logs. This tool transforms raw, verbose log files into an intuitive, multi-layered dashboard for rapid diagnostics and process analysis.
 
-
-*(**Developer Note:** Please run the app, upload `AOP101ULD.txt`, and take a screenshot of the complete output page. Upload it to a site like [imgur.com](https://imgur.com) and replace the URL above.)*
-
 ---
 
 ## Key Features
@@ -109,9 +106,3 @@ The entire analysis pipeline (parsing and reporting) is wrapped in a single func
 -   [ ] **Formal State Model Tracking:** Implement a state machine to explicitly track and display the GEM `ControlState` and `ProcessingState` throughout the log.
 -   [ ] **Advanced UI Filtering:** Add UI elements (multiselect, date range) to filter the detailed event log directly in the app.
 -   [ ] **Visualizations:** Add charts to plot KPIs over time or visualize alarm frequency.
-
----
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
