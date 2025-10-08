@@ -4,7 +4,7 @@ Reporting Logic for Hirata Loadport Log Analyzer.
 This module generates CSV and chronological, human-readable reports.
 """
 import pandas as pd
-from src.knowledge_base import KNOWLEDGE_BASE
+from knowledge_base import KNOWLEDGE_BASE
 
 # --- Individual Description Generators ---
 
@@ -26,8 +26,15 @@ def _describe_magazine_docked(data):
             
 def _describe_alarm(data):
     state = data.get('AlarmState', 'N/A')
+    alarm_text = data.get('AlarmTEXT', 'Unknown Alarm')
     prefix = "**ALARM:** " if state == "AlarmSet" else ""
-    return f"{prefix}Alarm ID '{data.get('AlarmID')}' state changed to: {state}."
+    return f"{prefix}Alarm '{data.get('AlarmID')}' ({alarm_text}) changed to: {state}."
+
+def _describe_svid_change(data):
+    """Generates a description for an SVID change event."""
+    svid_name = data.get('SVID_Name', 'Unknown SVID')
+    svid_value = data.get('SVID_Value', 'N/A')
+    return f"Status Update: {svid_name} is now '{svid_value}'."
 
 # --- Dispatch Table for Descriptions ---
 
@@ -37,6 +44,7 @@ EVENT_DESCRIPTORS = {
     181: _describe_magazine_docked,
     101: _describe_alarm,
     102: _describe_alarm,
+    16: _describe_svid_change,
     # Add other CEID -> description function mappings here
 }
 

@@ -4,7 +4,7 @@ Log Parsing Logic for Hirata Loadport Log Analyzer.
 This module contains functions to parse log content into structured data.
 """
 import re
-from src.knowledge_base import KNOWLEDGE_BASE
+from knowledge_base import KNOWLEDGE_BASE
 
 # --- Individual Parser Functions ---
 
@@ -60,12 +60,26 @@ def _parse_generic(full_text):
             data[key] = match.group(1)
     return data
 
+def _parse_svid_change(full_text):
+    """Parses SVID changes from event reports."""
+    data = {}
+    # Structure: <L[2] <U4[1] SVID> <A[n] SVID_VALUE>>
+    svid_matches = re.findall(r"<\s*L\s*\[2\]\s*<\s*U\d\s*\[\d+\]\s*(\d+)\s*>\s*<\s*A\s*\[\d+\]\s*'([^']*)'\s*>\s*>", full_text)
+    if svid_matches:
+        svid, value = svid_matches[0]
+        svid = int(svid)
+        data['SVID'] = svid
+        data['SVID_Name'] = KNOWLEDGE_BASE['svid_map'].get(svid, f"Unknown SVID({svid})")
+        data['SVID_Value'] = value
+    return data
+
 # --- Dispatch Table ---
 
 CEID_PARSERS = {
     141: _parse_port_status_change,
     120: _parse_id_read,
     181: _parse_magazine_docked,
+    16: _parse_svid_change, # GemPPChangeEvent often reports SVID changes
     # Add other CEID -> function mappings here as needed
 }
 
@@ -74,40 +88,58 @@ CEID_PARSERS = {
 def parse_secs_data(data_lines):
     """
     Parses a list of data lines into a structured dictionary using a dispatch pattern.
+    This version robustly finds the CEID instead of assuming it's the first ID.
     """
     full_text = "\n".join(data_lines)
     data = {}
-    ceid, rcmd, alarm_id = None, None, None
+    ceid = None
+    rcmd = None
     ceid_map = KNOWLEDGE_BASE['ceid_map']
+    alid_map = KNOWLEDGE_BASE['alid_map']
 
-    # Identify CEID/AlarmID
+    # Find all potential integer IDs in the message
     potential_ids = re.findall(r"<\s*U\d\s*\[\d+\]\s*(\d+)\s*>", full_text)
-    if potential_ids:
-        pid = int(potential_ids[0])
-        if ceid_map.get(pid) in ["AlarmSet", "AlarmClear"]:
-            alarm_id = pid
-            data['AlarmID'] = alarm_id
-            data['AlarmState'] = ceid_map.get(pid)
-        elif pid in ceid_map:
+
+    # Find the CEID by checking all potential IDs against the ceid_map
+    for pid_str in potential_ids:
+        pid = int(pid_str)
+        if pid in ceid_map:
             ceid = pid
-            data['CEID'] = ceid
+            break  # Found the first valid CEID, assume it's the primary one
+
+    # If a CEID was found, process it
+    if ceid:
+        data['CEID'] = ceid
+        event_name = ceid_map.get(ceid)
+
+        # Handle Alarms specifically
+        if event_name in ["AlarmSet", "AlarmClear"]:
+            # In an alarm message, the ALID is usually the number following the CEID
+            try:
+                ceid_index = potential_ids.index(str(ceid))
+                if ceid_index + 1 < len(potential_ids):
+                    alarm_id = int(potential_ids[ceid_index + 1])
+                    data['AlarmID'] = alarm_id
+                    data['AlarmState'] = event_name
+                    data['AlarmTEXT'] = alid_map.get(alarm_id, f"Unknown Alarm ID ({alarm_id})")
+            except (ValueError, IndexError):
+                pass  # Could not find ALID, but we still have the CEID
+
+        # Use the dispatch table to find the correct parser for any event
+        parser_func = CEID_PARSERS.get(ceid, _parse_generic)
+        parsed_data = parser_func(full_text)
+        data.update(parsed_data)
 
     # Identify RCMD for Host Commands (S2F49)
     rcmd_match = re.search(r"<\s*A\s*\[\d+\]\s*'([A-Z_]{5,})'\s*>", full_text)
     if rcmd_match and rcmd_match.group(1) in KNOWLEDGE_BASE['rcmd_map']:
         rcmd = rcmd_match.group(1)
         data['RCMD'] = rcmd
-
-    # Apply specific parsing based on message type
-    if rcmd:
-        param_pairs = re.findall(r"<\s*L\s*\[2\]\s*<A\s*\[\d+\]\s*'([^']+)'>\s*<(?:A|U\d)\s*\[\d+\]\s*'([^']*)'>\s*>", full_text)
-        for key, value in param_pairs:
-            data[key] = value
-    elif ceid:
-        # Use the dispatch table to find the correct parser
-        parser_func = CEID_PARSERS.get(ceid, _parse_generic)
-        parsed_data = parser_func(full_text)
-        data.update(parsed_data)
+        # This part should only run if it's an RCMD, not if we already found a CEID
+        if not ceid:
+            param_pairs = re.findall(r"<\s*L\s*\[2\]\s*<A\s*\[\d+\]\s*'([^']+)'>\s*<(?:A|U\d)\s*\[\d+\]\s*'([^']*)'>\s*>", full_text)
+            for key, value in param_pairs:
+                data[key] = value
         
     return data
 

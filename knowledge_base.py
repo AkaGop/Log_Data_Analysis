@@ -102,5 +102,34 @@ KNOWLEDGE_BASE = {
         "16": "PanelID/Slot Mismatch",
         "32": "Destination Slot Full",
         "128": "Resume Continue",
+    },
+
+    # ALID (Alarm ID) Map - Mappings extracted from log file analysis.
+    # Descriptions are generic placeholders until spec is available.
+    "alid_map": {
+        2: "Alarm Value 2",
+        18: "Alarm Value 18",
+        101: "Alarm 101 (Set/Clear)",
+        1001: "Load Port Interlock Error",
+        1002: "Emergency Stop Activated",
+        1003: "Panel Jammed in Shuttle",
+        2001: "ID Reader Communication Failure",
+    },
+
+    # SVID (Status Variable ID) Map - Mappings extracted from log file analysis.
+    # Descriptions are inferred from CEID map or are generic placeholders.
+    "svid_map": {
+        122: "LoadedToMag or UnloadedFromTool",
+        123: "Mapping Data Information",
+        124: "Unload Operation Info",
+        125: "Panel Information",
+        141: "PortStatusChange",
+        150: "Magazine Dock Request Info",
+        151: "Load Operation Info",
+        152: "Unload Operation Info",
+        180: "RequestMagazineDock",
+        181: "MagazineDocked",
+        182: "MagazineUndocked",
+        183: "RequestOperatorIdCheck",
     }
 }
